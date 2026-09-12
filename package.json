@@ -1,0 +1,13 @@
+{
+  "name": "quota-cli",
+  "version": "1.0.0",
+  "description": "CLI natif (Node, zero dep) : quotas OpenCode Go (compte proxy ccp) + Codex ChatGPT dans le terminal",
+  "type": "module",
+  "bin": {
+    "quota": "./quota.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

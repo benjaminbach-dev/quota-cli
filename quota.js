@@ -2,6 +2,7 @@
 // quota-cli — quotas OpenCode Go (compte proxy ccp) + Codex (ChatGPT Plus/Pro)
 // Port hors-opencode du plugin opencode-quota-go-codex. Zéro dépendance, Node >= 20.
 
+import crypto from "crypto"
 import fs from "fs"
 import os from "os"
 import path from "path"
@@ -86,6 +87,11 @@ const CACHE_PATH = path.join(
 )
 
 const CACHE_TTL_MS = 60_000
+
+// Empreinte courte du credential pour la clé de cache (dérivée non réversible,
+// le secret lui-même n'est jamais stocké ni loggué).
+const fingerprint = (secret) =>
+  crypto.createHash("sha256").update(secret).digest("hex").slice(0, 12)
 
 const readAuth = () => {
   try {
@@ -285,13 +291,36 @@ const readCache = () => {
   }
 }
 
+// Écriture atomique (tmp + rename) pour ne jamais laisser un cache.json tronqué.
 const writeCache = (cache) => {
   try {
     fs.mkdirSync(path.dirname(CACHE_PATH), { recursive: true })
-    fs.writeFileSync(CACHE_PATH, JSON.stringify(cache))
+    const tmp = CACHE_PATH + ".tmp"
+    fs.writeFileSync(tmp, JSON.stringify(cache))
+    fs.renameSync(tmp, CACHE_PATH)
   } catch {
     // cache best-effort : échec d'écriture silencieux
   }
+}
+
+// Validation stricte d'un résultat issu du cache : un JSON valide mais mal
+// structuré doit être ignoré (refetch), pas faire planter le rendu.
+const validResult = (result) => {
+  if (!result || typeof result !== "object") return false
+  if (typeof result.name !== "string" || typeof result.ok !== "boolean") return false
+  if (result.ok) {
+    if (!result.windows || typeof result.windows !== "object" || Array.isArray(result.windows))
+      return false
+    return Object.values(result.windows).every(
+      (window) =>
+        window &&
+        typeof window === "object" &&
+        ((typeof window.usedPercent === "number" && Number.isFinite(window.usedPercent)) ||
+          typeof window.valueLabel === "string") &&
+        (window.resetAt === null || typeof window.resetAt === "number"),
+    )
+  }
+  return typeof result.error === "string" && result.error.length > 0
 }
 
 // ---------------------------------------------------------------- orchestration
@@ -302,22 +331,31 @@ const PROVIDERS = {
 }
 
 const fetchProvider = async (key) => {
-  // cache disque 60 s (succès uniquement), tolère plusieurs invocations rapprochées
+  let cred
+  if (key.id === "go") cred = readGoKey()
+  else cred = readCodexCredentials()
+  if (!cred)
+    return { name: key.name, ok: false, error: "non configure — lancer `opencode auth login`" }
+
+  // cache disque 60 s (succès uniquement), clé liée au provider ET au credential
+  const cacheKey = `${key.id}:${fingerprint(key.id === "go" ? cred.key : cred.accessToken)}`
   const cache = readCache()
-  const cached = cache[key.id]
-  if (cached && typeof cached.at === "number" && Date.now() - cached.at < CACHE_TTL_MS) {
+  const cached = cache[cacheKey]
+  if (
+    cached &&
+    typeof cached.at === "number" &&
+    Date.now() - cached.at < CACHE_TTL_MS &&
+    validResult(cached.result)
+  ) {
     return cached.result
   }
+
   let result
   try {
     if (key.id === "go") {
-      const cred = readGoKey()
-      if (!cred) result = { name: key.name, ok: false, error: "non configure — lancer `opencode auth login`" }
-      else result = { name: key.name, ok: true, source: cred.source, windows: await fetchOpenCodeGo(cred.key) }
+      result = { name: key.name, ok: true, source: cred.source, windows: await fetchOpenCodeGo(cred.key) }
     } else {
-      const cred = readCodexCredentials()
-      if (!cred) result = { name: key.name, ok: false, error: "non configure — lancer `opencode auth login`" }
-      else result = { name: key.name, ok: true, windows: await fetchCodex(cred.accessToken, cred.accountId) }
+      result = { name: key.name, ok: true, windows: await fetchCodex(cred.accessToken, cred.accountId) }
     }
   } catch (error) {
     result = {
@@ -330,8 +368,11 @@ const fetchProvider = async (key) => {
     }
   }
   if (result.ok) {
-    cache[key.id] = { at: Date.now(), result }
-    writeCache(cache)
+    // relecture avant écriture : avec `all`, deux providers écrivent en parallèle —
+    // on merge au lieu d'écraser l'entrée écrite par l'autre.
+    const fresh = readCache()
+    fresh[cacheKey] = { at: Date.now(), result }
+    writeCache(fresh)
   }
   return result
 }
