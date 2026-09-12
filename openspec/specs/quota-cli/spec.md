@@ -44,7 +44,7 @@ Le CLI MUST NOT afficher, logger ou renvoyer la clé API ou le token OAuth, ni p
 - **THEN** l'affichage se limite à « erreur reseau » et aucune portion du credential n'apparaît
 
 ### Requirement: Cache et fraîcheur du reset
-Le CLI SHALL mettre en cache le résultat de chaque provider en mémoire pendant 60 s (succès uniquement), afin de tolérer les invocations rapprochées dans une même session. Le délai de reset SHALL être recalculé à chaque rendu à partir du `resetAt` absolu, de sorte qu'il progresse même lorsque le résultat vient du cache.
+Le CLI SHALL mettre en cache le résultat de chaque provider dans un **cache disque** (`~/.cache/quota-cli/cache.json`, respect de `XDG_CACHE_HOME`) pendant 60 s (succès uniquement), afin de tolérer les invocations rapprochées — chaque invocation étant un processus distinct. Le délai de reset SHALL être recalculé à chaque rendu à partir du `resetAt` absolu, de sorte qu'il progresse même lorsque le résultat vient du cache.
 
 #### Scenario: Deux invocations rapprochées
 - **WHEN** la commande est invoquée deux fois à moins de 60 s d'intervalle

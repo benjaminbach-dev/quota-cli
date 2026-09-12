@@ -26,7 +26,7 @@ Chemin proxy surchargeable : `--proxy-config <path>` ou `QUOTA_PROXY_CONFIG`.
 ## Fonctionnement
 
 - `GET https://opencode.ai/zen/go/v1/usage` + `GET https://chatgpt.com/backend-api/wham/usage` en parallèle, timeout 15 s.
-- Cache mémoire 60 s par provider (succès uniquement) ; le délai de reset est recalculé à chaque rendu.
+- Cache disque 60 s par provider (`~/.cache/quota-cli/cache.json`, XDG respecté — succès uniquement) ; le délai de reset est recalculé à chaque rendu.
 - Erreurs contrôlées par provider, secrets jamais affichés (ni intégralement ni partiellement).
 - 401 → inviter à relancer `opencode auth login`.
 
