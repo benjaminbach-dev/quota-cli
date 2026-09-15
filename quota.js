@@ -9,9 +9,9 @@ import path from "path"
 
 // ---------------------------------------------------------------- arguments
 
-const USAGE = `Usage: quota [go|codex|all] [--compact] [--markdown] [--terminal] [--proxy-config <path>]
+const USAGE = `Usage: quota [go|codex|hyper|all] [--compact] [--markdown] [--terminal] [--proxy-config <path>]
 
-  provider      go | codex | all (défaut : all)
+  provider      go | codex | hyper | all (défaut : all)
   --compact     une ligne par provider
   --markdown    rendu markdown (identique au plugin opencode-quota-go-codex)
   --terminal    rendu terminal couleur (défaut, forcé hors TTY si --markdown absent)
@@ -40,11 +40,11 @@ for (let i = 0; i < argv.length; i++) {
   } else if (a === "--help" || a === "-h") {
     console.log(USAGE)
     process.exit(0)
-  } else if (a === "go" || a === "codex" || a === "all") {
+  } else if (a === "go" || a === "codex" || a === "hyper" || a === "all") {
     provider = a
   } else {
     console.error(
-      `Argument inconnu : "${a}".\nProvider accepté : go, codex, all. Options : --compact, --markdown, --proxy-config <path>, --help.`,
+      `Argument inconnu : "${a}".\nProvider accepté : go, codex, hyper, all. Options : --compact, --markdown, --proxy-config <path>, --help.`,
     )
     process.exit(1)
   }
@@ -79,6 +79,19 @@ const PROXY_CONFIG_PATH =
   proxyConfigOverride ||
   process.env.QUOTA_PROXY_CONFIG ||
   path.join(os.homedir(), ".config", "claude-code-proxy", "config.json")
+
+// Clé API Hyper (Charm) : env en priorité, auth.json en repli.
+const readHyperKey = () => {
+  const envKey = process.env.HYPER_API_KEY
+  if (typeof envKey === "string" && envKey.trim())
+    return { key: envKey.trim(), source: "env" }
+  const entry = getEntry(readAuth(), ["hyper"])
+  if (!entry) return null
+  const key = typeof entry === "string" ? entry : entry?.key ?? entry?.token
+  return typeof key === "string" && key.trim()
+    ? { key: key.trim(), source: "auth.json" }
+    : null
+}
 
 const CACHE_PATH = path.join(
   process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"),
@@ -193,6 +206,42 @@ const formatMoney = (value) => {
 }
 
 // ---------------------------------------------------------------- fetch providers
+
+const HYPER_PLAN_CREDITS = 250 // abonnement $20/mois : 250 Hypercredits / jour
+
+const fetchHyper = async (apiKey) => {
+  const response = await fetch("https://hyper.charm.land/v1/credits", {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "User-Agent": "quota-cli",
+    },
+    signal: AbortSignal.timeout(15_000),
+  })
+  if (response.status === 401 || response.status === 403)
+    throw new ControlledError(
+      "authentification Hyper echouee — verifier HYPER_API_KEY (hyper.charm.land)",
+    )
+  if (!response.ok) throw new ControlledError(`API Hyper: HTTP ${response.status}`)
+  const payload = await response.json().catch(() => null)
+  const balance =
+    payload && typeof payload === "object" && typeof payload.balance === "number"
+      ? payload.balance
+      : null
+  if (balance === null || !Number.isFinite(balance))
+    throw new ControlledError("donnees Hyper inexploitables")
+  const windows = {
+    credits: makeWindow({
+      usedPercent: null,
+      valueLabel: `${formatMoney(Math.max(0, balance))} credits`,
+    }),
+  }
+  if (balance >= 0 && balance <= HYPER_PLAN_CREDITS) {
+    const usedPercent = ((HYPER_PLAN_CREDITS - balance) / HYPER_PLAN_CREDITS) * 100
+    windows.daily = makeWindow({ usedPercent, resetAt: null })
+  }
+  return windows
+}
 
 const fetchOpenCodeGo = async (apiKey) => {
   const response = await fetch("https://opencode.ai/zen/go/v1/usage", {
@@ -328,17 +377,26 @@ const validResult = (result) => {
 const PROVIDERS = {
   go: { id: "go", name: "OpenCode Go" },
   codex: { id: "codex", name: "Codex" },
+  hyper: { id: "hyper", name: "Hyper (Charm)" },
 }
 
 const fetchProvider = async (key) => {
   let cred
   if (key.id === "go") cred = readGoKey()
+  else if (key.id === "hyper") cred = readHyperKey()
   else cred = readCodexCredentials()
   if (!cred)
-    return { name: key.name, ok: false, error: "non configure — lancer `opencode auth login`" }
+    return {
+      name: key.name,
+      ok: false,
+      error:
+        key.id === "hyper"
+          ? "non configure — definir HYPER_API_KEY"
+          : "non configure — lancer `opencode auth login`",
+    }
 
   // cache disque 60 s (succès uniquement), clé liée au provider ET au credential
-  const cacheKey = `${key.id}:${fingerprint(key.id === "go" ? cred.key : cred.accessToken)}`
+  const cacheKey = `${key.id}:${fingerprint(key.id === "go" ? cred.key : cred.accessToken ?? cred.key)}`
   const cache = readCache()
   const cached = cache[cacheKey]
   if (
@@ -354,6 +412,8 @@ const fetchProvider = async (key) => {
   try {
     if (key.id === "go") {
       result = { name: key.name, ok: true, source: cred.source, windows: await fetchOpenCodeGo(cred.key) }
+    } else if (key.id === "hyper") {
+      result = { name: key.name, ok: true, source: cred.source, windows: await fetchHyper(cred.key) }
     } else {
       result = { name: key.name, ok: true, windows: await fetchCodex(cred.accessToken, cred.accountId) }
     }
@@ -379,7 +439,7 @@ const fetchProvider = async (key) => {
 
 // ---------------------------------------------------------------- rendu
 
-const WINDOW_ORDER = ["5h", "weekly", "monthly", "credits"]
+const WINDOW_ORDER = ["5h", "weekly", "monthly", "daily", "credits"]
 
 const orderedWindows = (windows) =>
   Object.keys(windows).sort((a, b) => {
@@ -500,7 +560,9 @@ const renderCompactTerminal = (result) => {
 // ---------------------------------------------------------------- sortie
 
 const selected =
-  provider === "all" ? [PROVIDERS.go, PROVIDERS.codex] : [PROVIDERS[provider]]
+  provider === "all"
+    ? [PROVIDERS.go, PROVIDERS.codex, PROVIDERS.hyper]
+    : [PROVIDERS[provider]]
 
 const results = await Promise.all(selected.map(fetchProvider))
 const render =

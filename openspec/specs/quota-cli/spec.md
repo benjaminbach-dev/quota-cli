@@ -7,7 +7,7 @@ Fournir une commande CLI native (Node ≥ 20, zéro dépendance) qui affiche les
 ## Requirements
 
 ### Requirement: Sources de credentials en priorité proxy
-Le CLI SHALL lire la clé API OpenCode Go en priorité dans la configuration ccp-proxy (`~/.config/claude-code-proxy/config.json`, chemin `opencode.apiKey`), ce chemin étant surchargeable par l'option `--proxy-config <path>` ou la variable d'environnement `QUOTA_PROXY_CONFIG`. Si cette source est absente ou inexploitable, le CLI SHALL retomber sur `~/.local/share/opencode/auth.json` (respect de `XDG_DATA_HOME`) avec le même algorithme que le plugin (aliases `opencode-go`, champs `key`/`token`). Les credentials Codex SHALL être lus uniquement depuis `auth.json` (aliases `openai`/`codex`/`chatgpt`, `access`/`token` + `accountId`).
+Le CLI SHALL lire la clé API OpenCode Go en priorité dans la configuration ccp-proxy (`~/.config/claude-code-proxy/config.json`, chemin `opencode.apiKey`), ce chemin étant surchargeable par l'option `--proxy-config <path>` ou la variable d'environnement `QUOTA_PROXY_CONFIG`. Si cette source est absente ou inexploitable, le CLI SHALL retomber sur `~/.local/share/opencode/auth.json` (respect de `XDG_DATA_HOME`) avec le même algorithme que le plugin (aliases `opencode-go`, champs `key`/`token`). Les credentials Codex SHALL être lus uniquement depuis `auth.json` (aliases `openai`/`codex`/`chatgpt`, `access`/`token` + `accountId`). La clé API Hyper (Charm) SHALL être lue depuis la variable d'environnement `HYPER_API_KEY` en priorité, puis depuis `auth.json` (alias `hyper`, champs `key`/`token`).
 
 #### Scenario: Clé présente dans la config proxy
 - **WHEN** `~/.config/claude-code-proxy/config.json` contient `opencode.apiKey` non vide
@@ -71,3 +71,14 @@ Chaque provider SHALL être exécuté dans son propre bloc d'erreur : l'échec d
 #### Scenario: Codex non configure
 - **WHEN** `auth.json` ne contient aucune entrée `openai`/`codex`/`chatgpt`
 - **THEN** le rendu Codex affiche « non configure — lancer `opencode auth login` » et le rendu OpenCode Go reste intact
+
+### Requirement: Provider Hyper (Charm)
+Le CLI SHALL interroger `GET https://hyper.charm.land/v1/credits` (header `Authorization: Bearer <clé>`) pour le provider `hyper` et exposer la sélection `hyper` en plus de `go`/`codex`/`all`. La réponse (`{balance}` en Hypercredits) SHALL être rendue comme une valeur de type credits (valeur numérique, pas de barre), le plan de l'abonnement (20 $/mois = 250 Hypercredits rafraîchis quotidiennement) servant à dériver un pourcentage de consommation lorsque possible. Les erreurs SHALL suivre le même traitement contrôlé que les autres providers (401 → message « relancer l'authentification Hyper », timeout 15 s, aucune fuite de la clé).
+
+#### Scenario: Balance Hyper affichée
+- **WHEN** l'API credits répond avec `{"balance": 187}`
+- **THEN** le rendu affiche la balance restante en Hypercredits (et, si dérivable, le pourcentage consommé du quota du plan)
+
+#### Scenario: Hyper non configure
+- **WHEN** `HYPER_API_KEY` est absente et `auth.json` n'a pas d'entrée `hyper`
+- **THEN** le rendu Hyper affiche « non configure — définir HYPER_API_KEY » et les autres providers restent intacts
