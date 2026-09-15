@@ -73,11 +73,11 @@ Chaque provider SHALL être exécuté dans son propre bloc d'erreur : l'échec d
 - **THEN** le rendu Codex affiche « non configure — lancer `opencode auth login` » et le rendu OpenCode Go reste intact
 
 ### Requirement: Provider Hyper (Charm)
-Le CLI SHALL interroger `GET https://hyper.charm.land/v1/credits` (header `Authorization: Bearer <clé>`) pour le provider `hyper` et exposer la sélection `hyper` en plus de `go`/`codex`/`all`. La réponse (`{balance}` en Hypercredits) SHALL être rendue comme une valeur de type credits (valeur numérique, pas de barre), le plan de l'abonnement (20 $/mois = 250 Hypercredits rafraîchis quotidiennement) servant à dériver un pourcentage de consommation lorsque possible. Les erreurs SHALL suivre le même traitement contrôlé que les autres providers (401 → message « relancer l'authentification Hyper », timeout 15 s, aucune fuite de la clé).
+Le CLI SHALL interroger `GET https://hyper.charm.land/v1/credits` (header `Authorization: Bearer <clé>`) pour le provider `hyper` et exposer la sélection `hyper` en plus de `go`/`codex`/`all`. L'API ne renvoyant que `{balance}` (balance en Hypercredits, sans heure de recharge), le rendu SHALL être une fenêtre `daily` : pourcentage **consommé** dérivé du plan (20 $/mois = 250 Hypercredits rafraîchis quotidiennement) — `used = (250 - balance) / 250 × 100` — avec reset affiché « — ». Si la balance dépasse le quota du plan (bundles prépayés empilés), la fenêtre `daily` est plafonnée à 0 % et une fenêtre `credits` affiche le surplus sous la forme `+N credits (bundle)`. Les erreurs SHALL suivre le même traitement contrôlé que les autres providers (401 → message « verifier HYPER_API_KEY », timeout 15 s, aucune fuite de la clé).
 
 #### Scenario: Balance Hyper affichée
 - **WHEN** l'API credits répond avec `{"balance": 187}`
-- **THEN** le rendu affiche la balance restante en Hypercredits (et, si dérivable, le pourcentage consommé du quota du plan)
+- **THEN** le rendu affiche la fenêtre `daily` à 25 % consommé ((250 − 187) / 250), reset « — »
 
 #### Scenario: Hyper non configure
 - **WHEN** `HYPER_API_KEY` est absente et `auth.json` n'a pas d'entrée `hyper`

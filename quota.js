@@ -231,15 +231,18 @@ const fetchHyper = async (apiKey) => {
   if (balance === null || !Number.isFinite(balance))
     throw new ControlledError("donnees Hyper inexploitables")
   const windows = {
-    credits: makeWindow({
-      usedPercent: null,
-      valueLabel: `${formatMoney(Math.max(0, balance))} credits`,
+    daily: makeWindow({
+      // % consommé du quota quotidien du plan (250 credits) — l'API ne
+      // renvoie que la balance, pas d'heure de recharge (reset « — »).
+      usedPercent: ((HYPER_PLAN_CREDITS - Math.max(0, balance)) / HYPER_PLAN_CREDITS) * 100,
+      resetAt: null,
     }),
   }
-  if (balance >= 0 && balance <= HYPER_PLAN_CREDITS) {
-    const usedPercent = ((HYPER_PLAN_CREDITS - balance) / HYPER_PLAN_CREDITS) * 100
-    windows.daily = makeWindow({ usedPercent, resetAt: null })
-  }
+  if (balance > HYPER_PLAN_CREDITS)
+    windows.credits = makeWindow({
+      usedPercent: null,
+      valueLabel: `+${formatMoney(balance - HYPER_PLAN_CREDITS)} credits (bundle)`,
+    })
   return windows
 }
 

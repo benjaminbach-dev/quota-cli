@@ -31,6 +31,6 @@ Chemin proxy surchargeable : `--proxy-config <path>` ou `QUOTA_PROXY_CONFIG`.
 - Cache disque 60 s par provider (`~/.cache/quota-cli/cache.json`, XDG respecté — succès uniquement) ; le délai de reset est recalculé à chaque rendu.
 - Erreurs contrôlées par provider, secrets jamais affichés (ni intégralement ni partiellement).
 - 401 → inviter à relancer `opencode auth login` (ou vérifier `HYPER_API_KEY` pour Hyper).
-- Hyper : la balance (`{balance}` en Hypercredits) est affichée telle quelle, plus un pourcentage `daily` dérivé du plan $20/mois (250 Hypercredits rafraîchis quotidiennement) lorsque la balance est dans [0, 250].
+- Hyper : le rendu est une fenêtre `daily` en pourcentage **consommé** du quota du plan ($20/mois = 250 Hypercredits/jour) — `(250 - balance) / 250 × 100`. L'API ne renvoie que `{balance}`, sans heure de recharge (reset « — »). Si la balance dépasse 250 (bundles prépayés), `daily` est plafonné à 0 % et une fenêtre `credits` affiche le surplus (`+N credits (bundle)`).
 
 Voir [openspec/specs/quota-cli/spec.md](openspec/specs/quota-cli/spec.md).
